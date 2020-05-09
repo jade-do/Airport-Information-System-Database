@@ -1,0 +1,728 @@
+/*
+ *  procdemo.pc
+ *
+ *  This program connects to ORACLE, declares and opens a cursor, 
+ *  fetches the names, salaries, and commissions of all
+ *  salespeople, displays the results, then closes the cursor. 
+ */ 
+
+#include <stdio.h>
+#include <string.h>
+#include <sqlca.h>
+#include <stdlib.h>
+#include <sqlda.h>
+#include <sqlcpr.h>
+
+#define UNAME_LEN      20 
+#define PWD_LEN        11 
+
+int list_airplanes();	// (1)
+int list_technician();	// (2)
+int list_traffic_controller();	// (3) 
+int list_test_history();	// (4)
+int insert_technician();	// (5)
+int delete_airplane();		// (6)
+int update_technician_expertise(long ssn);	// (7)
+int high_salary_technician();		// (8)
+int technician_expert_model(long ssn);	// (9)
+int total_model_experts(int model_no);	// (10)
+int airplane_tests_details(long registration_no);	// (11)
+int traffic_controller_details();	// (12)
+int testing_stats();			// (13)
+int test_sept_dec_2015();		// (14)
+
+/*
+ * Use the precompiler typedef'ing capability to create
+ * null-terminated strings for the authentication host
+ * variables. (This isn't really necessary--plain char *'s
+ * would work as well. This is just for illustration.)
+ */
+typedef char asciiz[50]; 
+typedef char asciiy[150];
+
+EXEC SQL TYPE asciiz IS CHARZ(PWD_LEN) REFERENCE; 
+asciiz     username; 
+asciiz     password; 
+
+struct model_info {
+	int	model_no;
+	int	capacity;
+	float	weight;	
+};
+
+struct model_count_info {
+	int	model_no;
+	int	total_experts;
+};
+
+struct airplane_info {
+	long	registration_no;
+	int	model_no;
+};
+
+struct airplane_model_info {
+        long    registration_no;
+        int     model_no;
+        int     capacity;
+        float   weight;
+};
+
+struct employee_info {
+	long	ssn;
+	int	union_no;
+	asciiz	first_name;
+	asciiz	last_name;
+	asciiy	address;
+	long	salary;
+};
+
+struct technician_info {
+	long	ssn;
+	int	expert_model;
+};
+
+struct traffic_controller_info {
+	long	ssn;
+	asciiz	med_exam_date;	
+};
+
+struct emp_technician_info {
+	long    ssn;
+        int     union_no;
+        asciiz  first_name;
+        asciiz  last_name;
+        asciiy  address;
+        long    salary;
+	int     expert_model;
+};
+
+struct emp_traffic_info {
+        long    ssn;
+        int     union_no;
+        asciiz  first_name;
+        asciiz  last_name;
+        asciiy  address;
+        long    salary;
+	asciiz  med_exam_date;
+};
+
+struct tech_model_info {
+	long	ssn;
+	asciiz first_name;
+	asciiz last_name;
+	int	expert_model;
+        int     capacity;
+        float   weight;	
+};
+
+struct quality_test_info {
+	int	faa_no;
+	asciiz	test_name;
+	int	max_score;
+};
+
+struct test_history_info {
+	long	test_id;
+	int	faa_no;
+	long	airplane_no;
+	long	tester_ssn;
+	asciiz	test_date;
+	int	test_hours;
+	int	score;	
+};
+
+struct test_history_quality_info {
+	long    test_id;
+        int     faa_no;
+        long    airplane_no;
+        long    tester_ssn;
+        asciiz  test_date;
+        int     test_hours;
+        int     score;
+        asciiz  test_name;
+        int     max_score;	
+};
+
+struct test_sept_dec_2015_info {
+        asciiz  first_name;
+        asciiz  last_name;
+	long    airplane_no;	
+	int     faa_no;
+	asciiz	test_date;
+};
+
+void sql_error(msg) 
+    char *msg;
+{ 
+    char err_msg[512];
+    size_t buf_len, msg_len;
+
+    EXEC SQL WHENEVER SQLERROR CONTINUE;
+
+    printf("\n%s\n", msg);
+
+/* Call sqlglm() to get the complete text of the
+ * error message.
+ */
+    buf_len = sizeof (err_msg);
+    sqlglm(err_msg, &buf_len, &msg_len);
+    printf("%.*s\n", msg_len, err_msg);
+
+    EXEC SQL ROLLBACK RELEASE;
+    exit(EXIT_FAILURE);
+}; 
+
+void main() 
+{ 
+    int option;
+/* Connect to ORACLE. */ 
+    strcpy(username, "thdoece467"); 
+    strcpy(password, "c16197"); 
+ 
+    EXEC SQL WHENEVER SQLERROR DO sql_error("ORACLE error--");
+ 
+    EXEC SQL CONNECT :username IDENTIFIED BY :password; 
+    printf("\nConnected to ORACLE as user: %s\n", username); 
+
+    do {
+	printf("Please enter menu option:\n"
+		"(1) List all Airplanes and Model Info\n"
+		"(2) List all Technician Employee Info\n"
+		"(3) List all Traffic Controller Employee Info\n"
+		"(4) List all Test History and Quality Test Info\n"
+		"(5) Insert a new technician\n"
+		"(6) Delete an existing airplane from the database.\n"
+		"(7) Update the expertise of an existing technician.\n"
+		"(8) List the details of the technician whose salary is greater than the average of the salary of all technicians.\n"
+		"(9) List all the model numbers that a given technician has the expertise, along with their capacity and weight information.\n"
+		"(10)List the total number of technicians who are experts in each model.\n"
+		"(11)List the details (test number, test name, maximum score, etc.) of the FAA tests for a given airplane, sorted by the maximum scores.\n"
+		"(12)List the most recent annual medical examination and his/her union membership number for each traffic controller.\n"
+		"(13)List the total number of tests done by each technician for a given airplane.\n"
+		"(14)List the name of the technician, the registration number of the airplane, and the FAA number of those tests done between September 2015 and December 2015, sorted by the FAA numbers.\n" 
+		"(0) Quit\n");
+	scanf("%d", &option);
+	switch(option) {
+		case 1:
+			list_airplanes(); 
+			break;
+		case 2:
+			list_technician(); 
+			break;
+		case 3:
+			list_traffic_controller(); 
+			break;
+		case 4:
+			list_test_history();
+			break;
+		case 5:
+			insert_technician();
+			break;
+		case 6:
+			delete_airplane();  
+			break;
+		case 7:
+			update_technician_expertise(1); 
+			break;
+		case 8:
+			high_salary_technician(); 
+			break;
+		case 9:
+			technician_expert_model(1);
+			break;
+		case 10:
+			total_model_experts(1);
+			break;
+		case 11:
+			airplane_tests_details(1);
+			break;
+		case 12:
+			traffic_controller_details(); 
+			break;
+		case 13:
+			testing_stats();  
+			break;
+		case 14:
+			test_sept_dec_2015();
+			break;
+		default:
+			goto end;
+			break;		
+	}
+    } while(option != 0);
+    end:
+    printf("\nGOOD-BYE!!\n\n");
+    
+    EXEC SQL COMMIT WORK RELEASE;
+    
+    exit(EXIT_SUCCESS); 
+}
+
+int list_airplanes() {
+	struct airplane_model_info *airplane_model_rec_ptr;
+
+	if((airplane_model_rec_ptr = 
+		(struct airplane_model_info *) malloc(sizeof(struct airplane_model_info)))== 0) {
+		fprintf(stderr, "Memory allocation error.\n");
+        	exit(EXIT_FAILURE);
+	}
+    	EXEC SQL DECLARE airplane_model_cursor CURSOR FOR
+        SELECT A.registrationNo, A.modelNo, M.capacity, M.weight
+        FROM Airplane as A, Model as M
+	WHERE A.modelNo = M.modelNo;	
+	
+	/* Open the cursor. */
+    	EXEC SQL OPEN airplane_model_cursor;
+
+    	printf("\n\nQuery 1: List full details of every airplane--\n\n");
+    	printf("%-20s %-20s %-20s %-20s\n", "RegistrationNo", "ModelNo", "Capacity", "Weight");
+    	printf(" %-20s %-20s %-20s %-20s\n","----------", "----------", "----------", "----------\n");
+
+    	EXEC SQL WHENEVER NOT FOUND DO break;
+
+    	for (;;) {
+        	EXEC SQL FETCH airplane_model_cursor INTO :airplane_model_rec_ptr;
+        	printf("%-20ld %-20d %-20d %-20.2f\n\n", airplane_model_rec_ptr->registration_no, airplane_model_rec_ptr->model_no, airplane_model_rec_ptr->capacity, airplane_model_rec_ptr->weight);
+    	}
+
+	/* Close the cursor. */
+	EXEC SQL CLOSE airplane_model_cursor;
+
+	free(airplane_model_rec_ptr);
+
+	return 0;
+}
+
+int list_technician() {
+        struct emp_technician_info *emp_technician_rec_ptr;
+
+        if((emp_technician_rec_ptr =
+                (struct emp_technician_info *) malloc(sizeof(struct emp_technician_info)))== 0) {
+                fprintf(stderr, "Memory allocation error.\n");
+                exit(EXIT_FAILURE);
+        }
+        EXEC SQL DECLARE emp_technician_cursor CURSOR FOR
+        SELECT E.ssn, E.unionNo, E.firstName, E.lastName, E.address, E.salary, T.expertModel
+        FROM Employee as E, Technician as T
+        WHERE E.ssn = T.ssn;
+	
+        /* Open the cursor. */
+        EXEC SQL OPEN emp_technician_cursor;
+
+        printf("\n\nQuery 2: List all Technician Employee Info--\n\n");
+        printf("%-20s %-20s %-20s %-20s %-20s %-20s %-20s\n", "SSN", "UnionNo", "FirstName", "LastName", "Address", "Salary", "ModelOfExpertise");
+        printf(" %-20s %-20s %-20s %-20s %-20s %-20s %-20s\n","----------", "----------", "----------","----------", "----------", "----------", "----------\n");
+
+        EXEC SQL WHENEVER NOT FOUND DO break;
+
+        for (;;) {
+                EXEC SQL FETCH emp_technician_cursor INTO :emp_technician_rec_ptr;
+                printf("%-20ld %-20d %-20s %-20s %-50s %-20ld %-20d\n\n", emp_technician_rec_ptr->ssn, emp_technician_rec_ptr->union_no, emp_technician_rec_ptr->first_name, emp_technician_rec_ptr->last_name, emp_technician_rec_ptr->address, emp_technician_rec_ptr->salary, emp_technician_rec_ptr->expert_model);
+        }
+
+        /* Close the cursor. */
+        EXEC SQL CLOSE emp_technician_cursor;
+
+        free(emp_technician_rec_ptr);
+
+        return 0;
+}
+
+int list_traffic_controller() {
+        struct emp_traffic_info *emp_traffic_rec_ptr;
+
+        if((emp_traffic_rec_ptr =
+                (struct emp_traffic_info *) malloc(sizeof(struct emp_traffic_info)))== 0) {
+                fprintf(stderr, "Memory allocation error.\n");
+                exit(EXIT_FAILURE);
+        }
+        EXEC SQL DECLARE emp_traffic_cursor CURSOR FOR
+        SELECT E.ssn, E.unionNo, E.firstName, E.lastName, E.address, E.salary, C.medExamDate
+        FROM Employee as E, TrafficController as C
+        WHERE E.ssn = C.ssn;
+
+        /* Open the cursor. */
+        EXEC SQL OPEN emp_traffic_cursor;
+     
+	printf("%-20s %-20s %-20s %-20s %-20s %-20s %-20s\n", "SSN", "UnionNo", "FirstName", "LastName", "Address", "Salary", "MedicalExamDate");
+	printf("%-20s %-20s %-20s %-20s %-20s %-20s %-20s\n", "----------", "----------", "----------", "----------", "----------", "----------", "----------\n");
+
+	EXEC SQL WHENEVER NOT FOUND DO break;
+
+        for (;;) {
+                EXEC SQL FETCH emp_traffic_cursor INTO :emp_traffic_rec_ptr;
+                printf("%-20ld %-20d %-20s %-20s %-50s %-20ld %-20s\n\n", emp_traffic_rec_ptr->ssn, emp_traffic_rec_ptr->union_no, emp_traffic_rec_ptr->first_name, emp_traffic_rec_ptr->last_name, emp_traffic_rec_ptr->address, emp_traffic_rec_ptr->salary, emp_traffic_rec_ptr->med_exam_date);
+        }
+
+        /* Close the cursor. */
+        EXEC SQL CLOSE emp_traffic_cursor;
+
+        free(emp_traffic_rec_ptr);
+        return 0;
+}
+
+int list_test_history() {
+        struct test_history_quality_info *test_history_quality_rec_ptr;
+
+        if((test_history_quality_rec_ptr =
+                (struct test_history_quality_info *) malloc(sizeof(struct test_history_quality_info)))== 0) {
+                fprintf(stderr, "Memory allocation error.\n");
+                exit(EXIT_FAILURE);
+        }
+        EXEC SQL DECLARE test_history_quality_cursor CURSOR FOR
+        SELECT H.testId, H.faaNo, H.airplaneNo, H.testerSsn, H.testDate, H.testHours, H.score, Q.name, Q.maxScore 
+        FROM TestHistory as H, QualityTest as Q
+        WHERE H.faaNo = Q.faaNo;
+
+        /* Open the cursor. */
+        EXEC SQL OPEN test_history_quality_cursor;
+
+	printf("%-20s %-20s %-20s %-20s %-20s %-20s %-20s %-20s %-20s\n", "TestID", "FAANo", "AirplaneNo", "TesterSSN", "TestDate", "TestHours", "TestScore", "TestName", "MaxScore");
+	printf("%-20s %-20s %-20s %-20s %-20s %-20s %-20s %-20s %-20s\n", "----------","----------","----------","----------","----------","----------","----------","----------","----------\n");
+	EXEC SQL WHENEVER NOT FOUND DO break;
+
+        for (;;) {
+                EXEC SQL FETCH test_history_quality_cursor INTO :test_history_quality_rec_ptr;
+        printf(" %-20ld %-20d %-20ld %-20ld %-20s %-20d %-20d %-20s %-20d\n", test_history_quality_rec_ptr->test_id, test_history_quality_rec_ptr->faa_no, test_history_quality_rec_ptr->airplane_no, test_history_quality_rec_ptr->tester_ssn, test_history_quality_rec_ptr->test_date, test_history_quality_rec_ptr->test_hours, test_history_quality_rec_ptr->score, test_history_quality_rec_ptr->test_name, test_history_quality_rec_ptr->max_score);
+	}
+
+        /* Close the cursor. */
+        EXEC SQL CLOSE test_history_quality_cursor;
+
+        free(test_history_quality_rec_ptr);
+        return 0;
+}
+
+int insert_technician() {
+	char * pos;
+	struct emp_technician_info *input;
+
+        if((input =
+                (struct emp_technician_info *) malloc(sizeof(struct emp_technician_info)))== 0) {
+                fprintf(stderr, "Memory allocation error.\n");
+               exit(EXIT_FAILURE);
+        }
+
+	// Prompt user to enter technician's values
+	printf("Enter technician's SSN (9-digit):\n ");
+	scanf("%ld", &(input->ssn));
+	printf("Enter technician's Union Number (4-digit at most):\n ");
+	scanf("%d%*c", &(input->union_no));
+	
+	printf("Enter technician's First Name:\n ");
+	fgets(input->first_name, sizeof(input->first_name), stdin);
+	printf("Enter technician's Last Name:\n ");
+	fgets(input->last_name, sizeof(input->last_name), stdin);
+	printf("Enter technician's Address:\n ");
+	fgets(input->address, sizeof(input->address), stdin);
+	printf("Enter technician's Salary:\n ");
+	scanf("%ld", &(input->salary));
+	printf("Enter technician's Model of Expertise:\n ");
+	scanf("%d", &(input->expert_model));
+      	
+	// Replacing the \n with \0 in String inputs
+	if ((pos = strchr(input->first_name, '\n')) != NULL) {
+		*pos = '\0';
+	}
+	if ((pos = strchr(input->last_name, '\n')) != NULL) {
+		*pos = '\0';
+	}
+	if ((pos = strchr(input->address, '\n')) != NULL) {
+		*pos = '\0';
+	}
+
+	printf("Insert: %ld %d %s %s %s %ld %d\n", input->ssn, input->union_no, input->first_name, input->last_name, input->address, input->salary, input->expert_model);
+ 
+	for(;;) {
+	 
+		EXEC SQL INSERT INTO Employee (ssn, unionNo, firstName, lastName, address, salary) VALUES(:input->ssn, :input->union_no, :input->first_name, :input->last_name, :input->address, :input->salary);
+		EXEC SQL INSERT INTO Technician (ssn, expertModel) VALUES(:input->ssn, :input->expert_model);
+		break;
+	}
+        
+	printf("INSERTION SUCCESSFUL!\n");
+	free(input);
+
+	return 0;
+}
+
+int delete_airplane() {
+	long reg_no;
+
+	printf("Enger the Registration Number of the airplane you want to delete:\n");
+	scanf("%ld%*c", &reg_no);
+
+	EXEC SQL WHENEVER NOT FOUND DO break;
+	for(;;) {
+		EXEC SQL DELETE FROM TestHistory WHERE airplaneNo = :reg_no;
+		EXEC SQL DELETE FROM Airplane WHERE registrationNo = :reg_no;
+	}        
+
+	printf("DELETION SUCCESSFUL!\n");
+
+	return 0;
+}
+
+int update_technician_expertise(long ssn) {
+	long my_ssn;
+	int my_model_no;
+
+	printf("Enter the SSN of the technician:\n");
+	scanf("%ld", &my_ssn);
+	printf("Enter the new model of expertise:\n");
+	scanf("%d", &my_model_no);
+	for(;;) {
+		EXEC SQL UPDATE Technician 
+			SET expertModel = :my_model_no
+			WHERE ssn = :my_ssn; 
+		break;
+	}
+	printf("UPDATE SUCCESSFULL!\n");
+
+        return 0;
+}
+
+int high_salary_technician() {
+
+	struct emp_technician_info *emp_technician_rec_ptr;
+
+        if((emp_technician_rec_ptr =
+                (struct emp_technician_info  *) malloc(sizeof(struct emp_technician_info )))== 0) {
+                fprintf(stderr, "Memory allocation error.\n");
+                exit(EXIT_FAILURE);
+        }
+        EXEC SQL DECLARE emp_technician_cursor2 CURSOR FOR
+        SELECT Employee.ssn, Employee.unionNo, Employee.firstName, Employee.lastName, Employee.address, Employee.salary, Technician.expertModel
+        FROM Employee, Technician 
+        WHERE Employee.ssn = Technician.ssn
+		AND Employee.salary > (SELECT AVG(Salary) FROM Employee, Technician WHERE Employee.ssn = Technician.ssn);
+
+        /* Open the cursor. */
+        EXEC SQL OPEN emp_technician_cursor2;
+	
+	printf("\n\nQuery8: List the details of technicians whose salary is greater than the average of the salary of all technicians--\n\n");
+	printf("%-20s %-20s %-20s %-20s %-20s %-20s %-20s\n", "SSN", "UnionNo", "FirstName", "LastName", "Address", "Salary", "ModelofExpertise");
+	printf("%-20s %-20s %-20s %-20s %-20s %-20s %-20s\n", "----------", "----------", "----------", "----------", "----------", "----------", "----------\n" );
+        EXEC SQL WHENEVER NOT FOUND DO break;
+
+        for (;;) {
+                EXEC SQL FETCH emp_technician_cursor2 INTO :emp_technician_rec_ptr;
+                printf("%-20ld %-20d %-20s %-20s %-50s %-20ld %-20d\n\n", emp_technician_rec_ptr->ssn, emp_technician_rec_ptr->union_no, emp_technician_rec_ptr->first_name, emp_technician_rec_ptr->last_name, emp_technician_rec_ptr->address, emp_technician_rec_ptr->salary, emp_technician_rec_ptr->expert_model);
+        }
+
+        /* Close the cursor. */
+        EXEC SQL CLOSE emp_technician_cursor2;
+
+        free(emp_technician_rec_ptr);
+	return 0;
+}
+
+int technician_expert_model(long ssn) {
+	long my_ssn;
+	
+	printf("Enter the technician's SSN (9-digit):\n");
+	scanf("%ld", &my_ssn);
+
+        struct tech_model_info *tech_model_rec_ptr;
+
+        if((tech_model_rec_ptr =
+                (struct tech_model_info  *) malloc(sizeof(struct tech_model_info )))== 0) {
+                fprintf(stderr, "Memory allocation error.\n");
+                exit(EXIT_FAILURE);
+        }
+        EXEC SQL DECLARE tech_model_cursor CURSOR FOR
+        SELECT Technician.ssn, Employee.firstName, Employee.lastName, Technician.expertModel, Model.capacity, Model.weight
+        FROM Employee, Technician, Model
+        WHERE Technician.ssn = :my_ssn 
+			AND Employee.ssn = :my_ssn
+			AND Technician.expertModel = Model.modelNo;
+
+        /* Open the cursor. */
+        EXEC SQL OPEN tech_model_cursor;
+
+	printf("\n\nQuery 9: List all the model numbers that a given technician has expertise, along with their capacity and weight information--\n\n");
+	printf("%-20s %-20s %-20s %-20s %-20s %-20s\n", "SSN", "FirstName", "LastName", "ModelOfExpertise", "Capacity", "Weight");
+	printf("%-20s %-20s %-20s %-20s %-20s %-20s\n", "----------", "----------", "----------", "----------", "----------", "----------\n");
+
+        EXEC SQL WHENEVER NOT FOUND DO break;
+        
+        for (;;) {
+                EXEC SQL FETCH tech_model_cursor INTO :tech_model_rec_ptr;             
+                printf("%-20ld %-20s %-20s %-20d %-20d %-20.2f\n\n", tech_model_rec_ptr->ssn, tech_model_rec_ptr->first_name, tech_model_rec_ptr->last_name, tech_model_rec_ptr->expert_model, tech_model_rec_ptr->capacity, tech_model_rec_ptr->weight);
+	}
+        
+        /* Close the cursor. */
+        EXEC SQL CLOSE tech_model_cursor;
+
+        free(tech_model_rec_ptr);	
+
+        return 0;
+}
+
+int total_model_experts(int model_no) {
+	
+	struct model_count_info *model_count_rec_ptr;
+
+        if((model_count_rec_ptr =
+                (struct model_count_info  *) malloc(sizeof(struct model_count_info )))== 0) {
+                fprintf(stderr, "Memory allocation error.\n");
+                exit(EXIT_FAILURE);
+        }
+
+	EXEC SQL DECLARE model_count_cursor CURSOR FOR
+	SELECT expertModel, COUNT(ssn) FROM Technician
+	GROUP BY expertModel;
+
+	EXEC SQL OPEN model_count_cursor;
+
+	printf("\n\nQuery 10: List the total number of technicians who are experts in each model\n");
+	printf("%-20s %-20s\n", "Model", "Total Experts");
+	printf("%-20s %-20s\n", "----------", "----------\n");
+
+	EXEC SQL WHENEVER NOT FOUND DO break;
+	for(;;) {
+		EXEC SQL FETCH model_count_cursor INTO: model_count_rec_ptr;
+		printf("%-20d %-20d\n", model_count_rec_ptr->model_no, model_count_rec_ptr->total_experts);
+	}
+	EXEC SQL CLOSE model_count_cursor;
+	free(model_count_rec_ptr);
+        return 0;
+}
+
+int airplane_tests_details(long registration_no) {
+	long my_airplane;
+
+	printf("Enter the Airplane's Registration Number (9-digit):\n");
+	scanf("%ld", &my_airplane);
+
+struct test_history_quality_info *airplane_test_rec_ptr;
+        if((airplane_test_rec_ptr =
+                (struct test_history_quality_info *) malloc(sizeof(struct test_history_quality_info)))== 0) {
+                fprintf(stderr, "Memory allocation error.\n");
+                exit(EXIT_FAILURE);
+        }
+        EXEC SQL DECLARE airplane_test_cursor CURSOR FOR
+        SELECT H.testId, H.faaNo, H.airplaneNo, H.testerSsn, H.testDate, H.testHours, H.score, Q.name, Q.maxScore
+        FROM TestHistory as H, QualityTest as Q
+        WHERE H.airplaneNo = :my_airplane
+		AND H.faaNo = Q.faaNo
+	ORDER BY Q.maxScore DESC;
+
+        /* Open the cursor. */
+        EXEC SQL OPEN airplane_test_cursor;
+
+	printf("%-20s %-20s %-20s %-20s %-20s %-20s %-20s %-20s %-20s\n", "TestID", "FAANo", "AirplaneNo", "TesterSSN", "TestDate", "TestHours", "TestScore", "TestName", "MaxScore");
+	printf("%-20s %-20s %-20s %-20s %-20s %-20s %-20s %-20s %-20s\n", "----------",  "----------", "----------", "----------", "----------", "----------", "----------", "----------", "----------\n");
+	
+	EXEC SQL WHENEVER NOT FOUND DO break;
+
+        for (;;) {
+                EXEC SQL FETCH airplane_test_cursor INTO :airplane_test_rec_ptr;
+        printf(" %-20ld %-20d %-20ld %-20ld %-20s %-20d %-20d %-20s %-20d\n", airplane_test_rec_ptr->test_id, airplane_test_rec_ptr->faa_no, airplane_test_rec_ptr->airplane_no, airplane_test_rec_ptr->tester_ssn, airplane_test_rec_ptr->test_date, airplane_test_rec_ptr->test_hours, airplane_test_rec_ptr->score, airplane_test_rec_ptr->test_name, airplane_test_rec_ptr->max_score);
+        }
+
+        /* Close the cursor. */
+        EXEC SQL CLOSE airplane_test_cursor;
+
+        free(airplane_test_rec_ptr);
+		
+        return 0;
+}
+
+int traffic_controller_details() {
+        struct emp_traffic_info *emp_traffic_rec_ptr;
+
+        if((emp_traffic_rec_ptr =
+                (struct emp_traffic_info *) malloc(sizeof(struct emp_traffic_info)))== 0) {
+                fprintf(stderr, "Memory allocation error.\n");
+                exit(EXIT_FAILURE);
+        }
+        EXEC SQL DECLARE emp_traffic_cursor2 CURSOR FOR
+        SELECT E.ssn, E.unionNo, E.firstName, E.lastName, E.address, E.salary, C.medExamDate
+        FROM Employee as E, TrafficController as C
+        WHERE E.ssn = C.ssn;
+
+        /* Open the cursor. */
+        EXEC SQL OPEN emp_traffic_cursor2;
+
+        printf("%-20s %-20s %-20s %-20s %-20s %-20s %-20s\n", "SSN", "UnionNo", "FirstName", "LastName", "Address", "Salary", "MedicalExamDate");
+        printf("%-20s %-20s %-20s %-20s %-20s %-20s %-20s\n", "----------", "----------", "----------", "----------", "----------", "----------", "----------\n");
+
+        EXEC SQL WHENEVER NOT FOUND DO break;
+
+        for (;;) {
+                EXEC SQL FETCH emp_traffic_cursor2 INTO :emp_traffic_rec_ptr;
+                printf("%-20ld %-20d %-20s %-20s %-20s\n\n", emp_traffic_rec_ptr->ssn, emp_traffic_rec_ptr->union_no, emp_traffic_rec_ptr->first_name, emp_traffic_rec_ptr->last_name, emp_traffic_rec_ptr->med_exam_date);
+        }
+
+        /* Close the cursor. */
+        EXEC SQL CLOSE emp_traffic_cursor2;
+
+        free(emp_traffic_rec_ptr);
+        return 0;
+}
+
+int testing_stats() {
+	long my_ssn;
+	long my_airplane;
+	int total;
+
+	printf("Enter technician's SSN (9-digit):\n");
+	scanf("%ld", &my_ssn);
+	printf("Enter airplane's Registration Number (9-digit):\n");
+	scanf("%ld", &my_airplane);
+
+	EXEC SQL DECLARE test_perform_cursor CURSOR FOR
+	SELECT COUNT(testId) FROM TestHistory
+	WHERE testerSsn = :my_ssn AND airplaneNo = :my_airplane;	
+
+	EXEC SQL OPEN test_perform_cursor;
+	EXEC SQL WHENEVER NOT FOUND DO break;
+	
+	for(;;) {
+		EXEC SQL FETCH test_perform_cursor into :total;
+		printf("\nThe Technician performed %d Tests on Airplane with Registration No %ld\n", total, my_airplane);
+	}
+	EXEC SQL CLOSE test_perform_cursor;
+
+        return 0;
+}
+
+int test_sept_dec_2015() {
+	struct test_sept_dec_2015_info * test_sept_dec_2015_rec_ptr;
+
+	if((test_sept_dec_2015_rec_ptr =
+                	(struct test_sept_dec_2015_info *) malloc(sizeof(struct test_sept_dec_2015_info)))== 0) {
+                	fprintf(stderr, "Memory allocation error.\n");
+                	exit(EXIT_FAILURE);
+        }
+
+	EXEC SQL DECLARE test_sept_dec_2015_cursor CURSOR FOR
+	SELECT Employee.firstName, Employee.lastName, TestHistory.airplaneNo, TestHistory.faaNo, TestHistory.testDate 
+	FROM Employee, TestHistory
+	WHERE Employee.ssn = TestHistory.testerSsn
+		AND TestHistory.testDate BETWEEN TO_DATE('09/01/2015','MM/DD/YYYY') AND TO_DATE('12/31/2015','MM/DD/YYYY')
+	ORDER BY faaNo;
+
+	/* Open the cursor. */	
+	EXEC SQL OPEN test_sept_dec_2015_cursor;
+ 
+	printf("\n\nQuery 14: List the name of the technician, the registration of the airplane, and the FAA number of those tests doe between September 2015 and December 2015, sorted by the FAA numbers.--\n\n");
+	printf("%-20s %-20s %-20s %-20s %-20s\n", "FirstName", "LastName", "AirplaneRegistrationNo", "FAANo", "TestDat");
+	printf("%-20s %-20s %-20s %-20s %-20s\n", "----------", "----------", "----------", "----------", "----------\n");
+	
+	EXEC SQL WHENEVER NOT FOUND DO break;
+
+	for (;;) {
+                EXEC SQL FETCH test_sept_dec_2015_cursor INTO :test_sept_dec_2015_rec_ptr;
+                printf("%-20s %-20s %-20ld %-20d %-20s\n\n", test_sept_dec_2015_rec_ptr->first_name, test_sept_dec_2015_rec_ptr->last_name, test_sept_dec_2015_rec_ptr->airplane_no, test_sept_dec_2015_rec_ptr->faa_no, test_sept_dec_2015_rec_ptr->test_date);
+	}
+
+	/* Close the cursor. */
+        EXEC SQL CLOSE test_sept_dec_2015_cursor;
+
+        free(test_sept_dec_2015_rec_ptr);	
+
+	return 0;
+}
+ 
